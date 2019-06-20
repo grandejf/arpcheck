@@ -74,7 +74,7 @@ foreach my $line (split /\n/, `/usr/sbin/arp -an 2>/dev/null`) {
 	if (exists $hosts{$ip}) {
 	    $hosts{$ip}->{mac} = $mac;
 	}
-	print "$ip, $mac\n" if $debug;
+	print STDERR "$ip, $mac\n" if $debug;
     }
 }
 
