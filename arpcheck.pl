@@ -131,7 +131,9 @@ if ($changes) {
 }
 
 
-mail($emailto,"arpcheck update",$message);
+if ($message) {
+  mail($emailto,"arpcheck update",$message);
+}
 
 exit;
 
