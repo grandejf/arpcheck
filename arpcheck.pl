@@ -72,9 +72,11 @@ foreach my $line (split /\n/, `/usr/sbin/arp -an 2>/dev/null`) {
     if ($line =~ m!\((\d+\.\d+\.\d+\.\d+)\) at (\S+:\S+:\S+:\S+:\S+:\S+)!o) {
 	my ($ip,$mac)= ($1, $2);
 	$mac = fix_mac($mac);
-	if (exists $hosts{$ip}) {
-	    $hosts{$ip}->{mac} = $mac;
+	if (!exists $hosts{$ip}) {
+	    $hosts{$ip} = {};
+	    $hosts{$ip}->{state} = "unpingable";
 	}
+	$hosts{$ip}->{mac} = $mac;
 	print "$ip, $mac\n" if $debug;
     }
 }
@@ -220,9 +222,12 @@ sub get_hostname {
 	    my $xml = `curl -m 2 $url 2>/dev/null`;
 	    $xml =~ s!(<\w+)\s+xmlns="(?:.+?)"!$1!og;
 	    if ($xml) {
-		my $dom = XML::LibXML->load_xml(string=>$xml);
-		$hostname = $dom->findvalue("/root/device/friendlyName") || '';
-		$hostname =~ s!\s+!_!go;
+		print "\n\n$xml\n\n" if $debug;
+		eval {
+		    my $dom = XML::LibXML->load_xml(string=>$xml);
+		    $hostname = $dom->findvalue("/root/device/friendlyName") || '';
+		    $hostname =~ s!\s+!_!go;
+		};
 	    }
 	}
     }
