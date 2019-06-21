@@ -4,6 +4,7 @@ use File::Basename; use Getopt::Long;
 use XML::LibXML;
 
 GetOptions('debug'=>\$debug,
+	   'force'=>\$force,
 	   'email=s'=>\$emailto,);
 
 my $dirname = dirname(__FILE__);
@@ -78,18 +79,8 @@ foreach my $line (split /\n/, `/usr/sbin/arp -an 2>/dev/null`) {
     }
 }
 
-my %upnp_location;
-if (-x "/usr/bin/gssdp-discover") {
-    my $ulist = `/usr/bin/gssdp-discover --timeout 2 --target upnp:rootdevice 2>/dev/null`;
-    foreach my $line (split /\n/, $ulist) {
-	if ($line =~ /Location: (\S+)/o) {
-	    my $url = $1;
-	    if ($url =~ m!//(.+):\d+/!o) {
-		$upnp_location{$1} = $url;
-	    }
-	}
-    }
-}
+my $upnp_checked = 0;
+my %upnp_location = ();
 
 my %prevmacs;
 if (open(PREV,"prevmacs.txt")) {
@@ -111,27 +102,37 @@ $macprefixes = read_oui();
 my $now = time();
 my $message = '';
 my $changes = 0;
+
 foreach my $ip (sort compare_ips keys %hosts) {
-    my $mac = $hosts{$ip}->{mac};
-    next unless $mac;
-    my $prefix = $mac;
-    $prefix =~ s!^(..:..:..):.+!$1!o;
-    $prefix =~ s!:!-!go;
-    my $manuf = $macprefixes->{$prefix} || 'unknown';
-    $hosts{$ip}->{manuf} = $manuf;
-    my $hostname = get_hostname($ip);
-    if (!exists $prevmacs{$mac}) {
-	$message .= "New MAC address: $mac ($manuf) $ip ($hostname)\n";
-	$changes = 1;
-    }
-    $prevmacs{$mac}{ip} = $ip;
-    $prevmacs{$mac}{hostname} = $hostname;
-    $prevmacs{$mac}{ts} = $now;
-    $prevmacs{$mac}{active} = 'active';
-    $prevmacs{$mac}{manuf} = $manuf;
+   my $mac = $hosts{$ip}->{mac};
+   next unless $mac;
+   if (!exists $prevmacs{$mac}) {
+       $changes = 1;
+   }
 }
 
-if ($changes) {
+if ($changes || $force) {
+    foreach my $ip (sort compare_ips keys %hosts) {
+	my $mac = $hosts{$ip}->{mac};
+	next unless $mac;
+	my $prefix = $mac;
+	$prefix =~ s!^(..:..:..):.+!$1!o;
+	$prefix =~ s!:!-!go;
+	my $manuf = $macprefixes->{$prefix} || 'unknown';
+	$hosts{$ip}->{manuf} = $manuf;
+	my $hostname = get_hostname($ip);
+	if (!exists $prevmacs{$mac}) {
+	    $message .= "New MAC address: $mac ($manuf) $ip ($hostname)\n";
+	}
+	$prevmacs{$mac}{ip} = $ip;
+	$prevmacs{$mac}{hostname} = $hostname;
+	$prevmacs{$mac}{ts} = $now;
+	$prevmacs{$mac}{active} = 'active';
+	$prevmacs{$mac}{manuf} = $manuf;
+    }
+}
+
+if ($changes || $force) {
     if (open(NEW,">prevmacs.txt")) {
 	foreach my $mac (sort compare_macs keys %prevmacs) {
 	    print NEW join("\t",$mac,
@@ -213,6 +214,7 @@ sub get_hostname {
     chomp $hostname;
     $hostname = '' if $hostname =~ m!;;!o;
     if (!$hostname) {
+	upnp_discover();
 	my $url = $upnp_location{$ip};
 	if ($url) {
 	    my $xml = `curl -m 2 $url 2>/dev/null`;
@@ -226,6 +228,24 @@ sub get_hostname {
     }
     return $hostname;
 }
+
+sub upnp_discover {
+    return if $upnp_checked;
+    %upnp_location = ();
+    if (-x "/usr/bin/gssdp-discover") {
+	my $ulist = `/usr/bin/gssdp-discover --timeout 2 --target upnp:rootdevice 2>/dev/null`;
+	foreach my $line (split /\n/, $ulist) {
+	    if ($line =~ /Location: (\S+)/o) {
+		my $url = $1;
+		if ($url =~ m!//(.+):\d+/!o) {
+		    $upnp_location{$1} = $url;
+		}
+	    }
+	}
+    }
+    $upnp_checked = 1;
+}
+    
 
 sub mail {
     my ($to,$subject,$message) = @_;
