@@ -78,6 +78,19 @@ foreach my $line (split /\n/, `/usr/sbin/arp -an 2>/dev/null`) {
     }
 }
 
+my %upnp_location;
+if (-x "/usr/bin/gssdp-discover") {
+    my $ulist = `/usr/bin/gssdp-discover --timeout 2 --target upnp:rootdevice 2>/dev/null`;
+    foreach my $line (split /\n/, $ulist) {
+	if ($line =~ /Location: (\S+)/o) {
+	    my $url = $1;
+	    if ($url =~ m!//(.+):\d+/!o) {
+		$upnp_location{$1} = $url;
+	    }
+	}
+    }
+}
+
 my %prevmacs;
 if (open(PREV,"prevmacs.txt")) {
     while (<PREV>) {
@@ -87,8 +100,8 @@ if (open(PREV,"prevmacs.txt")) {
 	my $mac = $fields[0];
 	next unless $mac;
 	$prevmacs{$mac}{ip} = $fields[1];
-	$prevmacs{$mac}{ts} = $fields[2];
-	$prevmacs{$mac}{prevmanuf} = $fields[3];
+	$prevmacs{$mac}{ts} = $fields[3];
+	$prevmacs{$mac}{prevmanuf} = $fields[4];
     }
     close PREV;
 }
@@ -106,11 +119,13 @@ foreach my $ip (sort compare_ips keys %hosts) {
     $prefix =~ s!:!-!go;
     my $manuf = $macprefixes->{$prefix} || 'unknown';
     $hosts{$ip}->{manuf} = $manuf;
+    my $hostname = get_hostname($ip);
     if (!exists $prevmacs{$mac}) {
-	$message .= "New MAC address: $mac ($manuf) $ip\n";
+	$message .= "New MAC address: $mac ($manuf) $ip ($hostname)\n";
 	$changes = 1;
     }
     $prevmacs{$mac}{ip} = $ip;
+    $prevmacs{$mac}{hostname} = $hostname;
     $prevmacs{$mac}{ts} = $now;
     $prevmacs{$mac}{active} = 'active';
     $prevmacs{$mac}{manuf} = $manuf;
@@ -121,6 +136,7 @@ if ($changes) {
 	foreach my $mac (sort compare_macs keys %prevmacs) {
 	    print NEW join("\t",$mac,
 			   $prevmacs{$mac}{ip}||'',
+			   $prevmacs{$mac}{hostname}||'',
 			   $prevmacs{$mac}{ts}||'',
 			   $prevmacs{$mac}{manuf}||$prevmacs{$mac}{prevmanuf}||'',
 			   $prevmacs{$mac}{active}||'');
@@ -132,7 +148,12 @@ if ($changes) {
 
 
 if ($message) {
-  mail($emailto,"arpcheck update",$message);
+    if ($debug) {
+	print "$message\n";
+    }
+    else {
+	mail($emailto,"arpcheck update",$message);
+    }
 }
 
 exit;
@@ -183,6 +204,27 @@ sub fix_mac {
 	push @parts, $part;
     }
     return join(":", @parts);
+}
+
+sub get_hostname {
+    my ($ip) = @_;
+
+    my $hostname = `dig +short -x $ip \@224.0.0.251 -p 5353 +timeout=1 +tries=1`;
+    chomp $hostname;
+    $hostname = '' if $hostname =~ m!;;!o;
+    if (!$hostname) {
+	my $url = $upnp_location{$ip};
+	if ($url) {
+	    my $xml = `curl -m 2 $url 2>/dev/null`;
+	    $xml =~ s!(<\w+)\s+xmlns="(?:.+?)"!$1!og;
+	    if ($xml) {
+		my $dom = XML::LibXML->load_xml(string=>$xml);
+		$hostname = $dom->findvalue("/root/device/friendlyName") || '';
+		$hostname =~ s!\s+!_!go;
+	    }
+	}
+    }
+    return $hostname;
 }
 
 sub mail {
