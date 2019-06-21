@@ -1,5 +1,6 @@
 #!/usr/bin/perl -w
 
+use Socket;
 use File::Basename; use Getopt::Long;
 use XML::LibXML;
 
@@ -211,10 +212,16 @@ sub fix_mac {
 
 sub get_hostname {
     my ($ip) = @_;
-
-    my $hostname = `dig +short -x $ip \@224.0.0.251 -p 5353 +timeout=1 +tries=1`;
+    
+    my $hostname;
+    $hostname = `dig +short -x $ip \@224.0.0.251 -p 5353 +timeout=1 +tries=1`;
     chomp $hostname;
     $hostname = '' if $hostname =~ m!;;!o;
+    return $hostname if $hostname;
+    
+    $hostname = gethostbyaddr(inet_aton($ip),AF_INET);
+    return $hostname if $hostname;
+    
     if (!$hostname) {
 	upnp_discover();
 	my $url = $upnp_location{$ip};
