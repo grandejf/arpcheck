@@ -123,7 +123,7 @@ if ($changes || $force) {
 	$prefix =~ s!:!-!go;
 	my $manuf = $macprefixes->{$prefix} || 'unknown';
 	$hosts{$ip}->{manuf} = $manuf;
-	my $hostname = get_hostname($ip);
+	my $hostname = get_hostname($ip) || '';
 	if (!exists $prevmacs{$mac}) {
 	    $message .= "New MAC address: $mac ($manuf) $ip ($hostname)\n";
 	}
