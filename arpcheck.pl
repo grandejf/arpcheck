@@ -238,6 +238,12 @@ sub get_hostname {
 	    }
 	}
     }
+    if (!$hostname) {
+	$hostname = `dig +short -x $ip \@192.168.1.1`;
+	chomp $hostname;
+	$hostname = '' if $hostname =~ m!;;!o;
+	return $hostname if $hostname;
+    }
     return $hostname;
 }
 
