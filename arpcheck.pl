@@ -262,11 +262,13 @@ sub upnp_discover {
 sub mail {
     my ($to,$subject,$message) = @_;
     return unless $to && $subject;
+    $message = "Subject: $subject\n\n$message\n";
+    
     if ($debug) {
 	print "$message\n";
     }
     else {
-	my $mail = qq[mail -s "$subject" $to];
+	my $mail = qq[msmtp $to];
 	open MAIL,"| $mail";
 	print MAIL $message;
 	close MAIL;
