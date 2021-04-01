@@ -3,6 +3,8 @@
 use Socket;
 use File::Basename; use Getopt::Long;
 use XML::LibXML;
+use lib '.';
+use EdgeOSAPI;
 
 GetOptions('debug'=>\$debug,
 	   'force'=>\$force,
@@ -11,9 +13,43 @@ GetOptions('debug'=>\$debug,
 my $dirname = dirname(__FILE__);
 chdir $dirname;
 
+my $router = "192.168.1.1";
+my @subnets = qw(192.168.1.0/24);
+
+my $edgeos_user = undef;
+my $edgeos_pass = undef;
+
+# read config file
+if (open(CONFIG,"config.txt")) {
+    while (<CONFIG>) {
+	my $line = $_;
+	chomp $line;
+	my ($key, $value) = ($line =~ /^\s*(.+?)\s*=\s*(.+?)\s*$/o);
+	if (defined($key) && defined($value)) {
+	    if ($key eq 'subnets') {
+		@subnets = split /\s+/, $value;
+	    }
+	    if ($key eq 'router') {
+		$router = $value;
+	    }
+	    if ($key eq 'snmp_community') {
+		$snmp_community = $value;
+	    }
+	    if ($key eq 'edgeos_user') {
+		$edgeos_user = $value;
+	    }
+	    if ($key eq 'edgeos_pass') {
+		$edgeos_pass = $value;
+	    }
+	}
+    }
+    close CONFIG;
+}
+
 my $cmd;
 
-$cmd = "nmap -sn 192.168.1.0/24 -oX -";
+
+$cmd = "nmap -sn ".join(' ',@subnets)." -oX -";
 $cmd .= " 2>/dev/null" unless $debug;
 
 my $xml = `$cmd`;
@@ -74,11 +110,34 @@ foreach my $line (split /\n/, `/usr/sbin/arp -an 2>/dev/null`) {
 	my ($ip,$mac)= ($1, $2);
 	$mac = fix_mac($mac);
 	if (!exists $hosts{$ip}) {
+	    next;
 	    $hosts{$ip} = {};
 	    $hosts{$ip}->{state} = "unpingable";
 	}
 	$hosts{$ip}->{mac} = $mac;
 	print "$ip, $mac\n" if $debug;
+    }
+}
+
+if ($snmp_community) {
+    my $subnet_re = join("|",map { my ($prefix) = ($_ =~ /^(\d+\.\d+\.\d+)/o); $prefix =~ s!\.!\\.!go; $prefix; } @subnets);
+
+    # EdgeRouter ARP table
+    foreach my $line (split /\n/, `snmpwalk -v 2c -c $snmp_community $router 1.3.6.1.2.1.4.22.1.2 -m IP-MIB`) {
+	if ($line =~ m!(\d+\.\d+\.\d+\.\d+) = (\S+): (.+)\s*$!o) {
+	    my ($ip, $mac) = ($1, $3);
+	    next unless $ip =~ /^($subnet_re)/o;
+	    $mac =~ s! +!:!go;
+	    $mac = lc $mac;
+	    $mac = fix_mac($mac);
+	    next if exists $hosts{$ip} && defined $hosts{$ip}->{mac};
+	    if (!exists $hosts{$ip}) {
+		$hosts{$ip} = {};
+		$hosts{$ip}->{state} = "unpingable";
+	    }
+	    $hosts{$ip}->{mac} = $mac;
+	    print "snmp $ip, $mac\n" if $debug;
+	}
     }
 }
 
@@ -114,6 +173,12 @@ foreach my $ip (sort compare_ips keys %hosts) {
    }
 }
 
+my $dhcp_leases;
+if ($edgeos_user && $edgeos_pass && $router) {
+    my $api = EdgeOSAPI->new($router,$edgeos_user,$edgeos_pass);
+    $dhcp_leases = $api->get_dhcp_leases();
+}
+
 if ($changes || $force) {
     foreach my $ip (sort compare_ips keys %hosts) {
 	my $mac = $hosts{$ip}->{mac};
@@ -127,7 +192,14 @@ if ($changes || $force) {
 	if (!exists $prevmacs{$mac}) {
 	    $message .= "New MAC address: $mac ($manuf) $ip ($hostname)\n";
 	}
-	$prevmacs{$mac}{ip} = $ip;
+	if ($prevmacs{$mac}{ip}) {
+	    my %ips = map { $_=>1 } split /,/, $prevmacs{$mac}{ip};
+	    $ips{$ip} = 1;
+	    $prevmacs{$mac}{ip} = join(",",sort keys %ips);
+	}
+	else {
+	    $prevmacs{$mac}{ip} = $ip;
+	}
 	$prevmacs{$mac}{hostname} = $hostname;
 	$prevmacs{$mac}{ts} = $now;
 	$prevmacs{$mac}{active} = 'active';
@@ -136,17 +208,30 @@ if ($changes || $force) {
 }
 
 if ($changes || $force) {
-    if (open(NEW,">prevmacs.txt")) {
+    if ($debug) {
 	foreach my $mac (sort compare_macs keys %prevmacs) {
-	    print NEW join("\t",$mac,
-			   $prevmacs{$mac}{ip}||'',
-			   $prevmacs{$mac}{hostname}||'',
-			   $prevmacs{$mac}{ts}||'',
-			   $prevmacs{$mac}{manuf}||$prevmacs{$mac}{prevmanuf}||'',
-			   $prevmacs{$mac}{active}||'');
-	    print NEW "\n";
+	    print join("\t",$mac,
+		       $prevmacs{$mac}{ip}||'',
+		       $prevmacs{$mac}{hostname}||'',
+		       $prevmacs{$mac}{ts}||'',
+		       $prevmacs{$mac}{manuf}||$prevmacs{$mac}{prevmanuf}||'',
+		       $prevmacs{$mac}{active}||'');
+	    print "\n";
 	}
-	close NEW;
+    }
+    else {
+	if (open(NEW,">prevmacs.txt")) {
+	    foreach my $mac (sort compare_macs keys %prevmacs) {
+		print NEW join("\t",$mac,
+			       $prevmacs{$mac}{ip}||'',
+			       $prevmacs{$mac}{hostname}||'',
+			       $prevmacs{$mac}{ts}||'',
+			       $prevmacs{$mac}{manuf}||$prevmacs{$mac}{prevmanuf}||'',
+			       $prevmacs{$mac}{active}||'');
+		print NEW "\n";
+	    }
+	    close NEW;
+	}
     }
 }
 
@@ -186,6 +271,8 @@ sub read_oui {
 sub compare_ips {
     my $aa = exists $prevmacs{$a} ? ($prevmacs{$a}{ip} || $a) : $a;
     my $bb = exists $prevmacs{$b} ? ($prevmacs{$b}{ip} || $b) : $b;
+    $aa =~ s!\,.+!!o;
+    $bb =~ s!\,.+!!o;
     my @aparts = split /\./, $aa;
     my @bparts = split /\./, $bb;
     return ($aparts[0] <=> $bparts[0]) ||
@@ -214,6 +301,14 @@ sub get_hostname {
     my ($ip) = @_;
     
     my $hostname;
+
+    if ($dhcp_leases->{$ip}) {
+       	$hostname = $dhcp_leases->{$ip}->{'client-hostname'};
+	if ($hostname) {
+	    return $hostname unless $hostname eq '?';
+	}
+    }
+    
     $hostname = `dig +short -x $ip \@224.0.0.251 -p 5353 +timeout=1 +tries=1`;
     chomp $hostname;
     $hostname = '' if $hostname =~ m!;;!o;
@@ -239,7 +334,7 @@ sub get_hostname {
 	}
     }
     if (!$hostname) {
-	$hostname = `dig +short -x $ip \@192.168.1.1`;
+	$hostname = `dig +short -x $ip \@$router`;
 	chomp $hostname;
 	$hostname = '' if $hostname =~ m!;;!o;
 	return $hostname if $hostname;
