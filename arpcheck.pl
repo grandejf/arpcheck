@@ -1,9 +1,14 @@
 #!/usr/bin/perl -w
 
+BEGIN {
+# add the directory the script is in to the include directories
+my ($script_inc_dir)=($ENV{_}=~/(.*)\/(.*)/);
+unshift @INC,$script_inc_dir;
+}
+
 use Socket;
 use File::Basename; use Getopt::Long;
 use XML::LibXML;
-use lib '.';
 use EdgeOSAPI;
 
 GetOptions('debug'=>\$debug,
