@@ -1,9 +1,10 @@
 #!/usr/bin/perl -w
 
 BEGIN {
-# add the directory the script is in to the include directories
-my ($script_inc_dir)=($ENV{_}=~/(.*)\/(.*)/);
-unshift @INC,$script_inc_dir;
+    # add the directory the script is in to the include directories
+    use File::Basename;
+    my $dirname = dirname(__FILE__);
+    unshift @INC,$dirname;
 }
 
 use Socket;
