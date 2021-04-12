@@ -183,6 +183,7 @@ my $dhcp_leases;
 if ($edgeos_user && $edgeos_pass && $router) {
     my $api = EdgeOSAPI->new($router,$edgeos_user,$edgeos_pass);
     $dhcp_leases = $api->get_dhcp_leases();
+    $api->logout();
 }
 
 if ($changes || $force) {

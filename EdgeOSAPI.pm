@@ -31,6 +31,13 @@ sub login {
     return;
 }
 
+sub logout {
+    my $self = shift;
+    my $url = "https://$self->{host}/logout";
+    my $res = $self->doQuery($url);
+    return;
+}
+
 sub get_dhcp_leases {
     my $self = shift;
     my $res = $self->doQuery("https://$self->{host}/api/edge/data.json?data=dhcp_leases");
