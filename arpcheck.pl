@@ -376,7 +376,7 @@ sub mail {
 	print "$message\n";
     }
     else {
-	my $mail = qq[msmtp $to];
+	my $mail = qq[mail $to];
 	open MAIL,"| $mail";
 	print MAIL $message;
 	close MAIL;
