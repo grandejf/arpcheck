@@ -370,13 +370,16 @@ sub upnp_discover {
 sub mail {
     my ($to,$subject,$message) = @_;
     return unless $to && $subject;
-    $message = "Subject: $subject\n\n$message\n";
+    $message = "\n\n$message\n";
+
+
+    $subject =~ s!"!'!go;
     
     if ($debug) {
 	print "$message\n";
     }
     else {
-	my $mail = qq[mail $to];
+	my $mail = qq[mail -s "$subject" $to];
 	open MAIL,"| $mail";
 	print MAIL $message;
 	close MAIL;
